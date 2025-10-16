@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+	
   <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Technical Interview</title>
@@ -619,6 +620,30 @@
     opacity: 0.6;
     cursor: not-allowed;
 }
+		.feedback-option-btn {
+    background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+    border: 2px solid #d1d5db;
+    padding: 14px 18px;
+    border-radius: 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+    font-weight: 500;
+    width: 100%;
+}
+
+.feedback-option-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    color: white;
+    border-color: #6366f1;
+    transform: translateY(-2px);
+}
+
+.feedback-option-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 		
         .recording-status {
             display: none;
@@ -814,6 +839,7 @@
         let sessionId = null;
         let selectedInterviewType = null;
         let documentsUploaded = false;
+        let interviewStartTime = null;
         
         let isRecording = false;
       
@@ -821,6 +847,9 @@
         
         let audioEnabled = true;
         let currentAudio = null;
+        
+        let idleTimer = null;
+        let lastActivityTime = Date.now();
         
         sessionId = 'tech_interview_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         console.log("🔧 Session ID:", sessionId);
@@ -842,6 +871,104 @@ if (window.speechSynthesis.getVoices().length === 0) {
     window.speechSynthesis.addEventListener('voiceschanged', initializeVoice);
 } else {
     initializeVoice();
+}
+
+function resetIdleTimer() {
+    lastActivityTime = Date.now();
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+    }
+    if (interviewStarted) {
+        idleTimer = setTimeout(() => {
+            handleIdleTimeout();
+        }, 300000); // 5 minutes
+    }
+}
+
+function handleIdleTimeout() {
+    if (!interviewStarted) return;
+    
+    interviewStarted = false;
+    
+    clearInterval(timerInterval);
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
+    window.speechSynthesis.cancel();
+    
+    addMessage('<strong>⏰ You\'ve been idle for 5 minutes</strong><br>The interview has been paused.', false);
+    
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const micBtn = document.getElementById('micBtn');
+    if (messageInput) messageInput.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+    if (micBtn) micBtn.disabled = true;
+    
+    const existingFeedback = document.querySelector('.feedback-section');
+    if (!existingFeedback) {
+        showFeedbackOptions('idle');
+    }
+}
+
+async function showFeedbackOptions(reason) {
+    const feedbackDiv = document.createElement('div');
+    feedbackDiv.className = 'feedback-section';
+    feedbackDiv.innerHTML = `
+        <h4>📝 Quick Feedback</h4>
+        <p>We noticed you ended the interview early — either by staying idle or typing END. Could you tell us why?</p>
+        <div style="display: flex; flex-direction: column; gap: 10px; margin: 16px 0;">
+            <button class="feedback-option-btn" onclick="submitQuickFeedback('just_exploring', '${reason}')">🤔 I was just exploring / testing the platform</button>
+            <button class="feedback-option-btn" onclick="submitQuickFeedback('no_time', '${reason}')">⏰ I didn’t have enough time to continue</button>
+            <button class="feedback-option-btn" onclick="submitQuickFeedback('need_prep', '${reason}')">📚 I’d like to prepare more and try again later</button>
+            <button class="feedback-option-btn" onclick="submitQuickFeedback('too_hard', '${reason}')">😰 The questions felt too difficult</button>
+			<button class="feedback-option-btn" onclick="submitQuickFeedback('different_interviewtype', '${reason}')">💬 I’d prefer a different interview type or role</button>
+			<button class="feedback-option-btn" onclick="submitQuickFeedback('dont_like', '${reason}')">👎 I didn’t enjoy the interview experience</button>
+		</div>
+    `;
+    document.getElementById('chatMessages').appendChild(feedbackDiv);
+    document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+}
+
+async function submitQuickFeedback(option, reason) {
+    const buttons = document.querySelectorAll('.feedback-option-btn');
+    buttons.forEach(btn => btn.disabled = true);
+    
+    const payload = {
+        sessionId: sessionId,
+        candidateEmail: candidateEmail,
+        interviewType: selectedInterviewType,
+        feedbackOption: option,
+        exitReason: reason,
+        timestamp: new Date().toISOString()
+    };
+    
+    try {
+        await fetch(FEEDBACK_URL, {
+            method: 'POST',
+            headers: { 
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        const feedbackSection = document.querySelector('.feedback-section');
+        if (feedbackSection) {
+            feedbackSection.innerHTML = '<h4>✅ Thank you for your feedback!</h4><p>We hope to see you again soon.</p>';
+        }
+        
+        interviewStarted = false;
+        
+    } catch (error) {
+        console.error('Error submitting quick feedback:', error);
+        const feedbackSection = document.querySelector('.feedback-section');
+        if (feedbackSection) {
+            feedbackSection.innerHTML = '<h4>✅ Thank you for your feedback!</h4><p>We hope to see you again soon.</p>';
+        }
+        interviewStarted = false;
+    }
 }
 		
         function showInterviewTypes() {
@@ -911,15 +1038,22 @@ if (window.speechSynthesis.getVoices().length === 0) {
             
             timeRemaining--;
             
-            if (timeRemaining <= 0) {
-                clearInterval(timerInterval);
-                
-                addMessage('<strong>⏰ Time is up!</strong><br>Generating your feedback and sending it to your email...');
-                document.getElementById('chatInput').style.display = 'none';
+         if (timeRemaining <= 0) {
+    clearInterval(timerInterval);
+    interviewStarted = false;
+    
+    addMessage('<strong>⏰ Time is up!</strong><br>Generating your feedback and sending it to your email...');
+    document.getElementById('chatInput').style.display = 'none';
 
-                sendMessage("END", true);
-                return;
-            }
+    const existingFeedback = document.querySelector('.feedback-section');
+    if (!existingFeedback) {
+        showFeedbackOptions('timeout');
+        setTimeout(() => {
+            sendMessage("END", true);
+        }, 5000);
+    }
+    return;
+}
         }
         
         function startTimer() {
@@ -987,9 +1121,9 @@ if (window.speechSynthesis.getVoices().length === 0) {
             console.log("🚀 Starting technical interview process...");
 
 			if (interviewType === 'complete') {
-    timeRemaining = 1800; // 30 minutes
+    timeRemaining = 1800;
 } else {
-    timeRemaining = 900; // 15 minutes
+    timeRemaining = 900;
 }
 			
             try {
@@ -1063,6 +1197,16 @@ if (window.speechSynthesis.getVoices().length === 0) {
         }
 
         function goBackToCategories() {
+            if (interviewStarted && interviewStartTime) {
+                const timeSpent = Math.round((Date.now() - interviewStartTime) / 1000);
+                
+            }
+
+            if (idleTimer) {
+                clearTimeout(idleTimer);
+                idleTimer = null;
+            }
+
 			window.speechSynthesis.cancel();
     document.querySelectorAll('.message.ai.speaking').forEach(msg => {
         msg.classList.remove('speaking');
@@ -1070,6 +1214,7 @@ if (window.speechSynthesis.getVoices().length === 0) {
             stopTimer();
             
             interviewStarted = false;
+            interviewStartTime = null;
             
             const chatMessagesDiv = document.getElementById('chatMessages');
             const messages = chatMessagesDiv.querySelectorAll('.message');
@@ -1078,8 +1223,8 @@ if (window.speechSynthesis.getVoices().length === 0) {
             const mcqOptions = chatMessagesDiv.querySelectorAll('.mcq-options');
             mcqOptions.forEach(opt => opt.remove());
 
-			const feedbackSection = document.querySelector('.feedback-section');
-if (feedbackSection) feedbackSection.remove();
+			const feedbackSections = document.querySelectorAll('.feedback-section');
+feedbackSections.forEach(section => section.remove());
 			
           const intro = document.querySelector('.interview-intro');
 if (intro) intro.remove();
@@ -1167,6 +1312,8 @@ if (intro) intro.remove();
 }
 		
         function setupInterviewUI(data) {
+        interviewStartTime = Date.now();
+
 		const intro = document.querySelector('.interview-intro');
 if (intro) intro.remove();
 
@@ -1232,6 +1379,8 @@ if (selectedInterviewType !== 'warmup') {
 }
 interviewStarted = true;
 
+resetIdleTimer();
+
 setTimeout(() => {
     const messageInput = document.getElementById('messageInput');
     if (messageInput) {
@@ -1275,6 +1424,8 @@ setTimeout(() => {
 		
         async function sendMessage(forcedMessage = null, systemTriggered = false) {
             if (!interviewStarted) return;
+
+            resetIdleTimer();
 
             const messageInput = document.getElementById('messageInput');
             const sendBtn = document.getElementById('sendBtn');
@@ -1414,27 +1565,43 @@ setTimeout(() => {
 }
 
                 if (data.response && data.response.includes("✅ Thanks for completing")) {
-                    const messageInput = document.getElementById('messageInput');
-                    const sendBtn = document.getElementById('sendBtn');
-                    const micBtn = document.getElementById('micBtn');
-                    if (messageInput) messageInput.disabled = true;
-                    if (sendBtn) sendBtn.disabled = true;
-                    if (micBtn) micBtn.disabled = true;
-                    document.querySelector(".end-instruction").textContent =
-                        "Interview has ended. Check your email for feedback ✅";
-					 setTimeout(() => {
-        const feedbackDiv = document.createElement('div');
-        feedbackDiv.className = 'feedback-section';
-        feedbackDiv.innerHTML = `
-            <h4>📝 Help Us Improve</h4>
-            <p>Your feedback is valuable! Share your experience (optional) or go back to select another interview type</p>
-            <textarea id="feedbackText" class="feedback-textarea" placeholder="Tell us about your interview experience, any issues you faced, or suggestions for improvement..."></textarea>
-            <button id="feedbackSubmitBtn" class="feedback-submit-btn" onclick="submitFeedback()">Submit Feedback</button>
-        `;
-        document.getElementById('chatMessages').appendChild(feedbackDiv);
-        document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
-    }, 1000);
-                }
+    const timeSpent = Math.round((Date.now() - interviewStartTime) / 1000);
+
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const micBtn = document.getElementById('micBtn');
+    if (messageInput) messageInput.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+    if (micBtn) micBtn.disabled = true;
+    document.querySelector(".end-instruction").textContent =
+        "Interview has ended. Check your email for feedback ✅";
+    
+    const existingFeedback = document.querySelector('.feedback-section');
+    if (!existingFeedback) {
+        const userEndedEarly = timeRemaining > 60;
+        if (userEndedEarly) {
+        setTimeout(() => {
+    const stillNoFeedback = document.querySelector('.feedback-section');
+    if (!stillNoFeedback) {
+        showFeedbackOptions('user_ended');
+    }
+}, 1000);
+        } else {
+            setTimeout(() => {
+                const feedbackDiv = document.createElement('div');
+                feedbackDiv.className = 'feedback-section';
+                feedbackDiv.innerHTML = `
+                    <h4>📝 Help Us Improve</h4>
+                    <p>Your feedback is valuable! Share your experience (optional) or go back to select another interview type</p>
+                    <textarea id="feedbackText" class="feedback-textarea" placeholder="Tell us about your interview experience, any issues you faced, or suggestions for improvement..."></textarea>
+                    <button id="feedbackSubmitBtn" class="feedback-submit-btn" onclick="submitFeedback()">Submit Feedback</button>
+                `;
+                document.getElementById('chatMessages').appendChild(feedbackDiv);
+                document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+            }, 1000);
+        }
+    }
+}
                 
             } catch (error) {
                 hideTypingIndicator();
@@ -1458,6 +1625,8 @@ setTimeout(() => {
 
         async function toggleRecording() {
             if (!interviewStarted) return;
+            
+            resetIdleTimer();
             
             if (!isRecording) {
                 await startRecording();
@@ -1610,11 +1779,15 @@ let accumulatedTranscript = '';
         const messageInput = document.getElementById('messageInput');
         if (messageInput) {
             messageInput.addEventListener('keypress', function(e) {
+                resetIdleTimer();
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
                     sendMessage();
                 }
             });
+            
+            messageInput.addEventListener('input', resetIdleTimer);
+            messageInput.addEventListener('focus', resetIdleTimer);
         }
         
         const resumeFileInput = document.getElementById('resumeFile');
@@ -1684,15 +1857,10 @@ let accumulatedTranscript = '';
         });
 
         console.log("🔧 Frontend initialized. API Base:", API_BASE);
-			document.addEventListener('DOMContentLoaded', () => {
+		document.addEventListener('DOMContentLoaded', () => {
     initializeVoice();
 });
 		
     </script>
-
-
-	
 </body>
-</html>
-
-
+	</html>
