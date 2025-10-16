@@ -1104,6 +1104,11 @@ async function submitQuickFeedback(option, reason) {
         
         async function startInterview(interviewType) {
             candidateEmail = document.getElementById('candidateEmail').value.trim();
+
+			if (typeof clarity !== 'undefined') {
+    clarity("identify", candidateEmail);
+}
+			
             const resumeFile = document.getElementById('resumeFile').files[0];
             const jobDescription = document.getElementById('jobDescription').value.trim();
             selectedInterviewType = interviewType;
@@ -1324,6 +1329,10 @@ if (intro) intro.remove();
         function setupInterviewUI(data) {
         interviewStartTime = Date.now();
 
+if (typeof clarity !== 'undefined') {
+    clarity("identify", candidateEmail);
+}
+			
 		const intro = document.querySelector('.interview-intro');
 if (intro) intro.remove();
 
